@@ -120,4 +120,28 @@ def train_model(df, yield_unit_choice, fert_unit_choice, kg_per_bag):
         raise DataError("Not enough usable rows to train a model (need at least 10).")
 
     if yield_unit_choice == "Auto-detect":
-        name = str(found
+        name = str(found["Yield"]).lower()
+        yield_is_mt = ("mt" in name or "ton" in name) and "kg" not in name or data["yield"].median() < 100
+    else:
+        yield_is_mt = yield_unit_choice == "MT/ha"
+    if yield_is_mt:
+        data["yield"] = data["yield"] * 1000
+
+    if fert_unit_choice == "Auto-detect":
+        fert_is_bags = "bag" in str(found["Fertilizer"]).lower()
+    else:
+        fert_is_bags = fert_unit_choice == "Bags"
+    if fert_is_bags:
+        data["fert"] = data["fert"] * kg_per_bag
+
+    f_mean = data["fert"].mean()
+    X = pd.DataFrame({
+        "Irrigation": data["irr"],
+        "F_cent": data["fert"] - f_mean,
+        "F_cent_sq": (data["fert"] - f_mean) ** 2,
+        "Rainfall": data["rain"],
+        "Season": data["season"],
+    })
+    X = sm.add_constant(X, has_constant="add")
+    model = sm.OLS(data["yield"], X).fit()
+    p = model.params
