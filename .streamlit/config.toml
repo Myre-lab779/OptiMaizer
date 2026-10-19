@@ -1,0 +1,11 @@
+# Save this file in your repository as:  .streamlit/config.toml
+[server]
+maxUploadSize = 5                 # MB; only matters if you ever turn uploads on
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+showErrorDetails = "none"         # visitors never see Python error details
+toolbarMode = "viewer"            # hides developer options from visitors
