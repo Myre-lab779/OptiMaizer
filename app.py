@@ -17,31 +17,21 @@ st.set_page_config(
 # ==============================================================================
 # DEPLOYMENT SETTINGS (security)
 # ==============================================================================
-# False = public-safe: visitors cannot upload files, so nobody can send data to the app.
-# Set to True only when you run the app on your own computer.
 ENABLE_UPLOAD = False
-MAX_UPLOAD_MB = 5          # only used when ENABLE_UPLOAD = True
+MAX_UPLOAD_MB = 5
 MAX_UPLOAD_ROWS = 5000
 MAX_UPLOAD_COLS = 50
-# False = rainfall is set by the system from the season (the public design: 3 user inputs).
-# Set True ONLY on your own computer, to type each test farm's rainfall when validating the app.
 ALLOW_RAINFALL_OVERRIDE = False
 
 # ==============================================================================
 # MODEL DEFINITION
-#   Y = B0 + B1(Irrigation 0/1) + B2(Fc) + B3(Fc^2) + B4(Rainfall) + B5(Season)
-#   Fc = fertilizer (kg) minus the mean fertilizer of the training data
-#   Y  = yield in kg/ha
 # ==============================================================================
-# Defaults = finalized equation, fitted on the 240-farm TRAINING set of the SIMULATED dataset
-# (generate_dataset.py, seed 2026; 80:20 split, random_state=42). These are the coefficients printed by
-# corn_model_analysis.py (default_params.txt). If your printout differs, paste yours here.
 DEFAULT_PARAMS = {
     "B0": 3835.25491030, "B1": 619.07847795, "B2": 5.95768991, "B3": -0.01864847,
     "B4": 1.14190054, "B5": 265.14618140, "F_mean": 317.00000000,
 }
-DEFAULT_RANGES = {"fert_range": (100.0, 600.0), "rain_range": (30.0, 1834.0)}   # range of the simulated data
-SEASON_RAIN = {0: 110.0, 1: 1155.0}   # rainfall (mm) the system uses for each season = seasonal mean of the dataset
+DEFAULT_RANGES = {"fert_range": (100.0, 600.0), "rain_range": (30.0, 1834.0)}
+SEASON_RAIN = {0: 110.0, 1: 1155.0}
 
 TERM_NAMES = {
     "B0": "Intercept",
@@ -70,12 +60,10 @@ class DataError(Exception):
 
 
 def _clean(x, n=30):
-    """Strip anything unusual from text that came from an uploaded file before showing it."""
     return re.sub(r"[^A-Za-z0-9 _.\-/()%]", "", str(x))[:n]
 
 
 def find_col(columns, include, exclude=("cent", "sq", "interact")):
-    """First column whose name contains a keyword in `include`, ignoring derived columns."""
     for c in columns:
         name = str(c).lower()
         if any(k in name for k in include) and not any(k in name for k in exclude):
@@ -103,7 +91,6 @@ def to_binary_season(series):
 
 
 def train_model(df, yield_unit_choice, fert_unit_choice, kg_per_bag):
-    """Fit the regression on an uploaded dataset. Returns (params, info). Raises DataError on bad data."""
     cols = list(df.columns)
     found = {
         "Yield": find_col(cols, ["yield", "prod"]),
@@ -115,19 +102,11 @@ def train_model(df, yield_unit_choice, fert_unit_choice, kg_per_bag):
     }
     missing = [k for k, v in found.items() if v is None]
     if missing:
-        raise DataError(
-            "Could not find column(s) for: " + ", ".join(missing)
-            + ". Column names should contain: yield, irrigation, fertilizer, rainfall, season "
-            "(use the raw fertilizer column, not the centered one)."
-        )
+        raise DataError("Could not find column(s) for: " + ", ".join(missing))
 
     notes = []
     irr, bad_irr = to_binary_irrigation(df[found["Irrigation"]])
     season, bad_season = to_binary_season(df[found["Season"]])
-    if bad_irr:
-        notes.append(f"Irrigation values not recognized (read as 0): {[_clean(v) for v in bad_irr[:6]]}")
-    if bad_season:
-        notes.append(f"Season values not recognized (read as Dry): {[_clean(v) for v in bad_season[:6]]}")
 
     data = pd.DataFrame({
         "yield": pd.to_numeric(df[found["Yield"]], errors="coerce"),
@@ -136,35 +115,24 @@ def train_model(df, yield_unit_choice, fert_unit_choice, kg_per_bag):
         "irr": irr,
         "season": season,
     })
-    n_before = len(data)
     data = data.dropna()
-    if n_before - len(data) > 0:
-        notes.append(f"Dropped {n_before - len(data)} row(s) with missing or non-numeric values.")
     if len(data) < 10:
         raise DataError("Not enough usable rows to train a model (need at least 10).")
 
-    # Yield unit -> kg/ha
     if yield_unit_choice == "Auto-detect":
         name = str(found["Yield"]).lower()
-        named_mt = ("mt" in name or "ton" in name) and "kg" not in name
-        yield_is_mt = named_mt or data["yield"].median() < 100
+        yield_is_mt = ("mt" in name or "ton" in name) and "kg" not in name or data["yield"].median() < 100
     else:
         yield_is_mt = yield_unit_choice == "MT/ha"
     if yield_is_mt:
         data["yield"] = data["yield"] * 1000
-    notes.append(f"Yield read as {'MT/ha (converted to kg/ha)' if yield_is_mt else 'kg/ha'}.")
 
-    # Fertilizer unit -> kg
     if fert_unit_choice == "Auto-detect":
         fert_is_bags = "bag" in str(found["Fertilizer"]).lower()
     else:
         fert_is_bags = fert_unit_choice == "Bags"
     if fert_is_bags:
         data["fert"] = data["fert"] * kg_per_bag
-    notes.append(
-        f"Fertilizer column '{_clean(found['Fertilizer'])}' read as "
-        + (f"bags (x {kg_per_bag:g} kg)." if fert_is_bags else "kg.")
-    )
 
     f_mean = data["fert"].mean()
     X = pd.DataFrame({
@@ -175,12 +143,6 @@ def train_model(df, yield_unit_choice, fert_unit_choice, kg_per_bag):
         "Season": data["season"],
     })
     X = sm.add_constant(X, has_constant="add")
-    if np.linalg.matrix_rank(X.values) < X.shape[1]:
-        raise DataError(
-            "The predictors are perfectly collinear or one has no variation "
-            "(for example, every row has the same irrigation or season value)."
-        )
-
     model = sm.OLS(data["yield"], X).fit()
     p = model.params
     params = {
@@ -206,10 +168,6 @@ def train_model(df, yield_unit_choice, fert_unit_choice, kg_per_bag):
     return params, info
 
 
-def signed(value, digits):
-    return f"- {abs(value):.{digits}f}" if value < 0 else f"+ {value:.{digits}f}"
-
-
 # ==============================================================================
 # SESSION STATE
 # ==============================================================================
@@ -223,8 +181,8 @@ if "calculated_yield" not in st.session_state:
     st.session_state.calculated_yield = None
 if "total_production" not in st.session_state:
     st.session_state.total_production = None
-if "tp_solved" not in st.session_state:
-    st.session_state.tp_solved = False
+if "yield_solved" not in st.session_state:
+    st.session_state.yield_solved = False
 
 bg_img_1 = get_base64_image("image_f034c4.png")
 map_bg = get_base64_image("map_bg.png")
@@ -234,55 +192,10 @@ map_bg = get_base64_image("map_bg.png")
 # ==============================================================================
 with st.sidebar:
     st.header("⚙️ Settings")
-
     dark_mode = st.toggle("🌙 Dark Mode", value=False)
-
     st.divider()
     st.subheader("Units")
     kg_per_bag = st.number_input("Kilograms per fertilizer bag", min_value=1.0, max_value=200.0, value=50.0, step=1.0)
-
-    uploaded_file = None
-    fert_unit_choice, yield_unit_choice = "Auto-detect", "Auto-detect"
-    if ENABLE_UPLOAD:                                   # hidden in the public deployment
-        fert_unit_choice = st.radio("Fertilizer column in your data is in", ["Auto-detect", "kg", "Bags"])
-        yield_unit_choice = st.radio("Yield column in your data is in", ["Auto-detect", "kg/ha", "MT/ha"])
-        st.divider()
-        st.caption("⚠️ Do not upload private or personal data to a shared app.")
-        uploaded_file = st.file_uploader("Upload Historical Data", type=["csv", "xlsx"])
-
-        template = pd.DataFrame({
-            "Irrigation": ["Yes", "No"],
-            "Fertilizer_kg": [250, 150],
-            "Rainfall_mm": [180, 45],
-            "Season": ["Wet", "Dry"],
-            "Yield_kg_ha": [7200, 5100],
-        })
-        st.download_button("⬇️ Sample CSV template", template.to_csv(index=False),
-                           file_name="corn_data_template.csv", mime="text/csv")
-
-    if uploaded_file is not None:
-        try:
-            if uploaded_file.size > MAX_UPLOAD_MB * 1024 * 1024:
-                raise DataError(f"The file is larger than {MAX_UPLOAD_MB} MB.")
-            if uploaded_file.name.lower().endswith(".csv"):
-                raw_df = pd.read_csv(uploaded_file, nrows=MAX_UPLOAD_ROWS + 1)
-            else:
-                raw_df = pd.read_excel(uploaded_file, nrows=MAX_UPLOAD_ROWS + 1)
-            if raw_df.shape[0] > MAX_UPLOAD_ROWS or raw_df.shape[1] > MAX_UPLOAD_COLS:
-                raise DataError(f"The file is too large (limit: {MAX_UPLOAD_ROWS} rows and {MAX_UPLOAD_COLS} columns).")
-            params, info = train_model(raw_df, yield_unit_choice, fert_unit_choice, kg_per_bag)
-            st.session_state.model_params = params
-            st.session_state.model_info = info
-            st.session_state.model_trained = True
-            st.success(f"✅ Model trained on {info['n']} rows.")
-            for note in info["notes"]:
-                st.text("• " + note)                    # plain text: file content is never rendered as markdown/HTML
-        except DataError as e:
-            st.session_state.model_trained = False
-            st.error(f"⚠️ {e}")
-        except Exception:                               # never show raw error details to visitors
-            st.session_state.model_trained = False
-            st.error("The file could not be processed. Check that it is a valid CSV or Excel file with the required columns.")
 
     with st.expander("Model coefficients"):
         mp_view = st.session_state.model_params
@@ -291,21 +204,17 @@ with st.sidebar:
             "Value": [mp_view[k] for k in TERM_NAMES],
         })
         st.dataframe(coef_df, hide_index=True, width="stretch")
-        info = st.session_state.model_info
-        if st.session_state.model_trained and info:
-            st.caption(f"n = {info['n']}  |  R² = {info['r2']:.4f}  |  Adj. R² = {info['r2_adj']:.4f}")
-            st.dataframe(info["table"], hide_index=True, width="stretch")
         if st.button("Reset to default coefficients"):
             st.session_state.model_params = dict(DEFAULT_PARAMS)
             st.session_state.model_trained = False
             st.session_state.model_info = None
             st.session_state.calculated_yield = None
             st.session_state.total_production = None
-            st.session_state.tp_solved = False
+            st.session_state.yield_solved = False
             st.rerun()
 
 # ==============================================================================
-# THEME
+# THEME CONFIGURATION
 # ==============================================================================
 if dark_mode:
     bg_color = "#111812"
@@ -373,8 +282,11 @@ st.markdown(f"""
         margin-top: 10px;
         margin-bottom: 20px;
     }}
-    .main label, .main p, .main span, .main div {{
+    .main label, .main p, .main span, .stMarkdown {{
         color: {text_color} !important;
+    }}
+    .stCaption {{
+        color: {desc_color} !important;
     }}
     div[data-baseweb="input"] input, div[data-baseweb="select"] div {{
         color: {input_text} !important;
@@ -424,9 +336,6 @@ mp = st.session_state.model_params
 
 st.warning("**Prototype.** The model was fitted to a **simulated dataset**, not real farm records. "
            "Results are model-based illustrations and should not be used as farm recommendations.")
-if ENABLE_UPLOAD and not st.session_state.model_trained:
-    st.info("💡 **Tip:** The default coefficients are the finalized model fitted on the 240-farm training set. "
-            "Uploading a file in the sidebar retrains the model on all rows of that file.")
 
 st.markdown("<div class='opt-title'>Optimaizer</div>", unsafe_allow_html=True)
 st.markdown("<div class='opt-subtitle'>Corn Yield Calculator</div>", unsafe_allow_html=True)
@@ -435,7 +344,7 @@ st.markdown("<div class='opt-desc'>A REGRESSION-BASED PROTOTYPE DESIGNED TO ESTI
 st.divider()
 
 # ==============================================================================
-# SECTION 1: YIELD
+# SECTION 1: YIELD (Per Hectare) - Exactly 3 inputs
 # ==============================================================================
 st.markdown("<div class='section-header'>🌾 YIELD</div>", unsafe_allow_html=True)
 
@@ -445,30 +354,22 @@ with y_col1:
     season_choice = st.selectbox("Cropping Season", ["Dry Season (0)", "Wet Season (1)"])
     s_val = 1 if "Wet" in season_choice else 0
 
-    if ALLOW_RAINFALL_OVERRIDE:                         # testing only
-        r_val = st.number_input("Rainfall (mm) - testing only", min_value=0.0, max_value=5000.0,
-                                value=SEASON_RAIN[s_val], step=1.0)
-    else:
-        r_val = SEASON_RAIN[s_val]
-        st.markdown(f"**Rainfall (set by the system for this season):** {r_val:,.0f} mm")
-        st.caption("Seasonal mean rainfall of the dataset. You do not need to enter it.")
+    r_val = SEASON_RAIN[s_val]
+    st.markdown(f"**Rainfall (set by the system for this season):** {r_val:,.0f} mm")
+    st.caption("Seasonal mean rainfall of the dataset. You do not need to enter it.")
 
     irr_choice = st.selectbox("Irrigation", ["No (0)", "Yes (1)"])
     i_val = 1 if "Yes" in irr_choice else 0
 
     f_bags = st.number_input("Fertilizer (Number of Bags per Hectare)", min_value=0.0, max_value=100.0, value=4.0, step=0.5)
 
-    farm_area = st.number_input("Farm Area (Hectares)", min_value=0.1, max_value=1000.0, value=1.0, step=0.1)
-
     st.markdown("---")
     st.markdown("**CONVERT TO METRIC TONS?**")
     yield_mt = st.checkbox("Show Yield in MT/ha", key="y_mt")
     st.caption("This is all in the assumption that the soil pH, soil moisture, and temperature is in typical growing conditions in the City of Ilagan.")
 
-current_inputs = (i_val, f_bags, r_val, s_val, kg_per_bag, farm_area)
-
 with y_col2:
-    if st.button("SOLVE", width="stretch", type="secondary"):
+    if st.button("SOLVE YIELD", width="stretch", type="secondary"):
         f_kg = f_bags * kg_per_bag
         f_cent = f_kg - mp["F_mean"]
 
@@ -478,8 +379,36 @@ with y_col2:
                   + mp["B4"] * r_val
                   + mp["B5"] * s_val)
 
-        calc_yield = max(y_calc, 0.0)
-        tot_prod = calc_yield * farm_area
+        st.session_state.calculated_yield = max(y_calc, 0.0)
+        st.session_state.yield_solved = True
 
-        st.session_state.raw_yield = y_calc
-        st
+    if st.session_state.get("yield_solved", False):
+        y_val = st.session_state.calculated_yield
+        y_disp = f"{y_val / 1000:,.2f} MT/ha" if yield_mt else f"{y_val:,.2f} kg/ha"
+        st.markdown(f"<div class='result-box'>🌾 Calculated Yield: {y_disp}</div>", unsafe_allow_html=True)
+
+st.divider()
+
+# ==============================================================================
+# SECTION 2: TOTAL PRODUCTION (Separate Area)
+# ==============================================================================
+st.markdown("<div class='section-header'>🚜 TOTAL PRODUCTION</div>", unsafe_allow_html=True)
+
+tp_col1, tp_col2 = st.columns([1, 1], gap="large")
+
+with tp_col1:
+    farm_area = st.number_input("Farm Area (Hectares)", min_value=0.1, max_value=1000.0, value=1.0, step=0.1)
+    st.caption("Enter your total farm land area to scale the per-hectare yield into total harvest production.")
+
+with tp_col2:
+    if st.button("SOLVE TOTAL PRODUCTION", width="stretch", type="secondary"):
+        if st.session_state.calculated_yield is not None:
+            st.session_state.total_production = st.session_state.calculated_yield * farm_area
+            st.session_state.tp_solved = True
+        else:
+            st.warning("Please solve for the Yield first in Section 1 above.")
+
+    if st.session_state.get("tp_solved", False) and st.session_state.total_production is not None:
+        tp_val = st.session_state.total_production
+        tp_disp = f"{tp_val / 1000:,.2f} MT" if yield_mt else f"{tp_val:,.2f} kg"
+        st.markdown(f"<div class='result-box'>🚜 Estimated Total Production: {tp_disp}</div>", unsafe_allow_html=True)
