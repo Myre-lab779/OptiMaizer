@@ -482,4 +482,4 @@ with y_col2:
         st.session_state.last_s_val = s_val
         st.session_state.last_inputs = current_inputs
 
-    if st.session_state.calculate:
+    
