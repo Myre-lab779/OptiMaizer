@@ -221,6 +221,8 @@ if "model_info" not in st.session_state:
     st.session_state.model_info = None
 if "calculated_yield" not in st.session_state:
     st.session_state.calculated_yield = None
+if "total_production" not in st.session_state:
+    st.session_state.total_production = None
 if "tp_solved" not in st.session_state:
     st.session_state.tp_solved = False
 
@@ -298,6 +300,7 @@ with st.sidebar:
             st.session_state.model_trained = False
             st.session_state.model_info = None
             st.session_state.calculated_yield = None
+            st.session_state.total_production = None
             st.session_state.tp_solved = False
             st.rerun()
 
@@ -370,7 +373,7 @@ st.markdown(f"""
         margin-top: 10px;
         margin-bottom: 20px;
     }}
-    .main label, .main p, .main span {{
+    .main label, .main p, .main span, .main div {{
         color: {text_color} !important;
     }}
     div[data-baseweb="input"] input, div[data-baseweb="select"] div {{
@@ -455,12 +458,14 @@ with y_col1:
 
     f_bags = st.number_input("Fertilizer (Number of Bags per Hectare)", min_value=0.0, max_value=100.0, value=4.0, step=0.5)
 
+    farm_area = st.number_input("Farm Area (Hectares)", min_value=0.1, max_value=1000.0, value=1.0, step=0.1)
+
     st.markdown("---")
     st.markdown("**CONVERT TO METRIC TONS?**")
     yield_mt = st.checkbox("Show Yield in MT/ha", key="y_mt")
     st.caption("This is all in the assumption that the soil pH, soil moisture, and temperature is in typical growing conditions in the City of Ilagan.")
 
-current_inputs = (i_val, f_bags, r_val, s_val, kg_per_bag)
+current_inputs = (i_val, f_bags, r_val, s_val, kg_per_bag, farm_area)
 
 with y_col2:
     if st.button("SOLVE", width="stretch", type="secondary"):
@@ -473,13 +478,8 @@ with y_col2:
                   + mp["B4"] * r_val
                   + mp["B5"] * s_val)
 
-        st.session_state.raw_yield = y_calc
-        st.session_state.calculated_yield = max(y_calc, 0.0)
-        st.session_state.step_i_val = i_val
-        st.session_state.step_f_cent = f_cent
-        st.session_state.step_f_kg = f_kg
-        st.session_state.last_r_val = r_val
-        st.session_state.last_s_val = s_val
-        st.session_state.last_inputs = current_inputs
+        calc_yield = max(y_calc, 0.0)
+        tot_prod = calc_yield * farm_area
 
-    
+        st.session_state.raw_yield = y_calc
+        st
