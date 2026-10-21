@@ -349,7 +349,7 @@ st.divider()
 # ==============================================================================
 # SECTION 1: YIELD (Per Hectare) - Exactly 3 inputs
 # ==============================================================================
-st.markdown("<div class='section-header'>🌾 YIELD</div>", unsafe_allow_html=True)
+st.markdown("<div class='section-header'>🌽 YIELD</div>", unsafe_allow_html=True)
 
 y_col1, y_col2 = st.columns([1, 1], gap="large")
 
