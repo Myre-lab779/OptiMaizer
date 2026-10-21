@@ -388,7 +388,7 @@ with y_col2:
     if st.session_state.get("yield_solved", False):
         y_val = st.session_state.calculated_yield
         y_disp = f"{y_val / 1000:,.2f} MT/ha" if yield_mt else f"{y_val:,.2f} kg/ha"
-        st.markdown(f"<div class='result-box'>🌾 Calculated Yield: {y_disp}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='result-box'>🌽 Calculated Yield: {y_disp}</div>", unsafe_allow_html=True)
 
 st.divider()
 
